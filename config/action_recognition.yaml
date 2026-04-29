@@ -1,0 +1,13 @@
+action_recognition_node:
+  ros__parameters:
+    config_path: ""           # STGCN 模型配置 yaml（留空则用 share 下 stgcn.yaml）
+    lazy_load: true
+    body_poses_topic: "/perception/body_poses"
+    actions_topic: "/perception/actions"
+    sequence_length: 30
+    infer_interval: 10        # 每 N 帧推理一次
+    score_threshold: 0.25     # 姿态置信度阈值
+    max_persons: 1          # 最大跟踪人数
+    use_upstream_track_id: false  # 默认不依赖上游 track_id，仅用框中心匹配
+    image_width: 640          # 图像宽（用于 STGCN 坐标归一化）
+    image_height: 480         # 图像高
