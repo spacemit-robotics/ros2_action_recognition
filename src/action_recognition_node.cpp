@@ -101,8 +101,14 @@ class ActionRecognitionNode : public rclcpp::Node {
         body_poses_topic_ = declare_parameter<std::string>("body_poses_topic", "/perception/body_poses");
         actions_topic_ = declare_parameter<std::string>("actions_topic", "/perception/actions");
         sequence_length_ = declare_parameter<int>("sequence_length", kSequenceLength);
+        if (sequence_length_ <= 0) {
+            throw std::runtime_error("sequence_length must be positive");
+        }
         infer_interval_ = declare_parameter<int>("infer_interval", 10);
         score_threshold_ = declare_parameter<double>("score_threshold", 0.25);
+        if (score_threshold_ < 0.0 || score_threshold_ > 1.0) {
+            throw std::runtime_error("score_threshold out of range, must be in [0, 1]");
+        }
         max_persons_ = declare_parameter<int>("max_persons", 10);
         use_upstream_track_id_ = declare_parameter<bool>("use_upstream_track_id", false);
         image_width_ = declare_parameter<int>("image_width", 640);
