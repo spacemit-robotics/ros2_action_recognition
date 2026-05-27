@@ -1,0 +1,7 @@
+model_path: /tmp/nonexistent_model.onnx
+class: deploy.stgcn.StgcnActionRecognizer
+default_params:
+  num_threads: 4
+  lazy_load: false
+providers:
+  - CPUExecutionProvider
