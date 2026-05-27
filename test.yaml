@@ -1,0 +1,32 @@
+module: middleware/ros2/perception/action_recognition
+
+tests:
+  - name: action-recognition-functional
+    description: Build body_pose and action_recognition, verify config errors and actions topic.
+    category: functional
+    scopes: [pr]
+    timeout_s: 300
+    workdir: sdk
+    command: |
+      cd middleware/ros2/perception
+      bash action_recognition/tests/test_functional.sh
+
+  - name: action-recognition-invalid-input
+    description: Reject invalid yaml, missing config/model, bad sequence_length and score_threshold.
+    category: functional
+    scopes: [pr]
+    timeout_s: 180
+    workdir: sdk
+    command: |
+      cd middleware/ros2/perception
+      bash action_recognition/tests/test_invalid_input.sh
+
+  - name: action-recognition-performance
+    description: Measure STGCN node initialization with real model; fail if over 5s threshold.
+    category: performance
+    scopes: [scheduled]
+    timeout_s: 300
+    workdir: sdk
+    command: |
+      cd middleware/ros2/perception
+      bash action_recognition/tests/test_performance.sh
