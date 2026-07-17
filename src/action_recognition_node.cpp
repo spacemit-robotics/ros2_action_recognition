@@ -10,7 +10,9 @@
 #include <algorithm>
 #include <cmath>
 #include <deque>
+#include <fstream>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -29,6 +31,26 @@ constexpr int kSequenceLength = 30;
 constexpr int kStgcnNumKeypoints = 13;
 // COCO 17 -> TSSTG/STGCN 13 (same as model_zoo fall_detection)
 constexpr int kCoco17ToTsstg13[] = {0, 5, 6, 7, 8, 9, 10, 11, 12, 1, 2, 3, 4};
+
+// Same built-in table as StgcnActionRecognizer when label_file_path is unavailable
+// (e.g. install-tree yaml cannot resolve model_zoo assets/).
+const std::vector<std::string> kDefaultStgcnClassNames = {
+    "Standing", "Walking", "Sitting", "Lying Down", "Stand up", "Sit down", "Fall Down",
+};
+
+std::vector<std::string> LoadLabelFile(const std::string& path) {
+    std::vector<std::string> names;
+    std::ifstream in(path);
+    if (!in) return names;
+    std::string line;
+    while (std::getline(in, line)) {
+        while (!line.empty() && (line.back() == '\r' || line.back() == '\n')) {
+            line.pop_back();
+        }
+        if (!line.empty()) names.push_back(line);
+    }
+    return names;
+}
 
 struct PersonBuffer {
     std::deque<std::vector<float>> frames;
@@ -49,7 +71,7 @@ std::vector<float> KeypointsToStgcnFrame(const body_pose::msg::BodyPose& pose) {
     return frame;
 }
 
-// Flatten 30 frames of 13*3 into pts for InferSequence.
+// Flatten 30 frames of 13*3 into pts for sequence Infer.
 std::vector<float> BufferToPts(const std::deque<std::vector<float>>& buffer) {
     const size_t need = static_cast<size_t>(kSequenceLength * kStgcnNumKeypoints * 3);
     std::vector<float> pts(need, 0.f);
@@ -129,7 +151,21 @@ class ActionRecognitionNode : public rclcpp::Node {
             throw std::runtime_error(
                 "VisionService::Create failed: " + VisionService::LastCreateError());
         }
-        class_names_ = service_->GetSequenceClassNames();
+        class_names_ = service_->GetClassNames();
+        if (class_names_.empty()) {
+            // VisionService only returns labels from yaml label_file_path; when that
+            // path does not resolve from the install share tree, load packaged labels.
+            try {
+                const std::string share_labels =
+                    ament_index_cpp::get_package_share_directory("action_recognition") +
+                    "/config/stgcn.txt";
+                class_names_ = LoadLabelFile(share_labels);
+            } catch (...) {
+            }
+        }
+        if (class_names_.empty()) {
+            class_names_ = kDefaultStgcnClassNames;
+        }
         if (class_names_.empty()) {
             throw std::runtime_error("STGCN model did not return class names");
         }
@@ -255,13 +291,26 @@ class ActionRecognitionNode : public rclcpp::Node {
             if (buf.frames.size() == static_cast<size_t>(sequence_length_) &&
                 (frame_count_ % std::max(1, infer_interval_) == 0)) {
                 std::vector<float> pts = BufferToPts(buf.frames);
-                std::vector<float> scores;
-                if (service_->InferSequence(pts.data(), image_width_, image_height_, &scores) ==
-                        VISION_SERVICE_OK &&
-                    !scores.empty()) {
-                    size_t pred = static_cast<size_t>(
-                        std::max_element(scores.begin(), scores.end()) - scores.begin());
-                    float conf = scores[pred];
+                VisionServiceRequest seq_req;
+                seq_req.sequence_pts = pts.data();
+                seq_req.sequence_count = static_cast<int>(pts.size());
+                seq_req.sequence_width = image_width_;
+                seq_req.sequence_height = image_height_;
+                VisionServiceResponse seq_resp;
+                const vision::Action* act = nullptr;
+                if (service_->Infer(seq_req, &seq_resp) == VISION_SERVICE_OK && seq_resp.ok &&
+                    !seq_resp.results.empty() &&
+                    (act = std::get_if<vision::Action>(&seq_resp.results[0])) != nullptr) {
+                    const std::vector<float>& scores = act->class_scores;
+                    size_t pred = 0;
+                    float conf = act->score;
+                    if (!scores.empty()) {
+                        pred = static_cast<size_t>(
+                            std::max_element(scores.begin(), scores.end()) - scores.begin());
+                        conf = scores[pred];
+                    } else if (act->label >= 0) {
+                        pred = static_cast<size_t>(act->label);
+                    }
                     std::string name =
                         (pred < class_names_.size()) ? class_names_[pred] : "Unknown";
 
@@ -284,7 +333,7 @@ class ActionRecognitionNode : public rclcpp::Node {
                         get_logger(),
                         *get_clock(),
                         3000,
-                        "InferSequence failed or empty: %s",
+                        "sequence Infer failed or empty: %s",
                         service_->LastError().c_str());
                 }
             }
