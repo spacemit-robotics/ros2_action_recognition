@@ -34,12 +34,19 @@ assert_node_fails_with_error \
     -p lazy_load:=false" \
   "VisionService::Create failed|Failed|No such file|runtime_error|Exception"
 
-echo "Test 3: invalid sequence_length"
+echo "Test 3: invalid sequence_length (0)"
 assert_node_fails_with_error \
   "ros2 run ${MODULE} ${NODE} --ros-args \
     -p sequence_length:=0 \
     -p lazy_load:=true" \
   "sequence_length|invalid|out of range|runtime_error|Exception"
+
+echo "Test 3b: invalid sequence_length (31, not model fixed 30)"
+assert_node_fails_with_error \
+  "ros2 run ${MODULE} ${NODE} --ros-args \
+    -p sequence_length:=31 \
+    -p lazy_load:=true" \
+  "sequence_length|must be 30|runtime_error|Exception"
 
 echo "Test 4: invalid score_threshold"
 LOG_FILE="$(mktemp "${TMPDIR:-/tmp}/perception_threshold_action_recognition.XXXXXX.log")"

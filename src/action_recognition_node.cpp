@@ -29,14 +29,22 @@ namespace {
 
 constexpr int kSequenceLength = 30;
 constexpr int kStgcnNumKeypoints = 13;
-// COCO 17 -> TSSTG/STGCN 13 (same as model_zoo fall_detection)
-constexpr int kCoco17ToTsstg13[] = {0, 5, 6, 7, 8, 9, 10, 11, 12, 1, 2, 3, 4};
+// COCO 17 -> TSSTG/STGCN 13 (same as model_zoo fall_detection):
+// keep nose + limbs (0, 5-16); drop eyes/ears (1-4).
+constexpr int kCoco17ToTsstg13[] = {0, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16};
 
 // Same built-in table as StgcnActionRecognizer when label_file_path is unavailable
 // (e.g. install-tree yaml cannot resolve model_zoo assets/).
 const std::vector<std::string> kDefaultStgcnClassNames = {
     "Standing", "Walking", "Sitting", "Lying Down", "Stand up", "Sit down", "Fall Down",
 };
+
+std::string ParentDir(const std::string& path) {
+    const std::string::size_type pos = path.find_last_of('/');
+    if (pos == std::string::npos) return ".";
+    if (pos == 0) return "/";
+    return path.substr(0, pos);
+}
 
 std::vector<std::string> LoadLabelFile(const std::string& path) {
     std::vector<std::string> names;
@@ -123,8 +131,11 @@ class ActionRecognitionNode : public rclcpp::Node {
         body_poses_topic_ = declare_parameter<std::string>("body_poses_topic", "/perception/body_poses");
         actions_topic_ = declare_parameter<std::string>("actions_topic", "/perception/actions");
         sequence_length_ = declare_parameter<int>("sequence_length", kSequenceLength);
-        if (sequence_length_ <= 0) {
-            throw std::runtime_error("sequence_length must be positive");
+        // STGCN sequence buffer/input is fixed at 30 frames; other values OOB.
+        if (sequence_length_ != kSequenceLength) {
+            throw std::runtime_error(
+                "sequence_length must be " + std::to_string(kSequenceLength) +
+                " for the current STGCN model");
         }
         infer_interval_ = declare_parameter<int>("infer_interval", 10);
         score_threshold_ = declare_parameter<double>("score_threshold", 0.25);
@@ -153,14 +164,16 @@ class ActionRecognitionNode : public rclcpp::Node {
         }
         class_names_ = service_->GetClassNames();
         if (class_names_.empty()) {
-            // VisionService only returns labels from yaml label_file_path; when that
-            // path does not resolve from the install share tree, load packaged labels.
-            try {
-                const std::string share_labels =
-                    ament_index_cpp::get_package_share_directory("action_recognition") +
-                    "/config/stgcn.txt";
-                class_names_ = LoadLabelFile(share_labels);
-            } catch (...) {
+            // VisionService resolves label_file_path via cwd/project-root only.
+            // Prefer labels beside the model yaml, then packaged share config.
+            class_names_ = LoadLabelFile(ParentDir(config_path) + "/stgcn.txt");
+            if (class_names_.empty()) {
+                try {
+                    class_names_ = LoadLabelFile(
+                        ament_index_cpp::get_package_share_directory("action_recognition") +
+                        "/config/stgcn.txt");
+                } catch (...) {
+                }
             }
         }
         if (class_names_.empty()) {
